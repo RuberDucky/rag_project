@@ -36,10 +36,23 @@ uv sync
 ```env
 PORT=8000
 DB_USERNAME=postgres
-DB_PASSWORD=root
+DB_PASSWORD=pass
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=rag_db
+
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+EMBEDDING_MODEL=qwen3-embedding:latest
+CHAT_MODEL=lfm2.5-thinking
+
+# RAG Configuration
+CHUNK_SIZE=1000
+CHUNK_OVERLAP=200
+TOP_K_RESULTS=5
+
+# Upload Configuration
+UPLOAD_DIR=uploads
+MAX_FILE_SIZE=10485760
 ```
 
 3. **Run the application**:
