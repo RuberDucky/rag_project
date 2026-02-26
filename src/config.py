@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     # Upload Config
     UPLOAD_DIR: str = "uploads"
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
+    DOCUMENT_RETENTION_DAYS: int = 2
+    CLEANUP_INTERVAL_HOURS: int = 24
     
     @property
     def database_url(self) -> str:

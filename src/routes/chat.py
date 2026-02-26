@@ -1,5 +1,5 @@
 """API routes for chat functionality."""
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Query
 from typing import List
 from uuid import UUID
 from datetime import datetime
@@ -32,10 +32,12 @@ async def chat(request: ChatRequest):
     try:
         result = await chat_engine.chat(
             user_message=request.message,
+            user_id=request.user_id,
             session_id=request.session_id
         )
         
         return ChatResponse(
+            user_id=result["user_id"],
             session_id=result["session_id"],
             message=request.message,
             response=result["response"],
@@ -52,15 +54,19 @@ async def chat(request: ChatRequest):
 
 
 @router.get("/conversations", response_model=List[ConversationHistory])
-async def list_conversations():
-    """Get list of all conversations."""
-    conversations = await Conversation.all().order_by("-updated_at")
+async def list_conversations(user_id: UUID | None = Query(default=None)):
+    """Get list of conversations, optionally filtered by user_id."""
+    query = Conversation.all()
+    if user_id:
+        query = query.filter(user_id=user_id)
+    conversations = await query.order_by("-updated_at")
     
     result = []
     for conv in conversations:
         message_count = await Message.filter(conversation_id=conv.id).count()
         result.append(
             ConversationHistory(
+                user_id=conv.user_id,
                 session_id=conv.session_id,
                 title=conv.title,
                 created_at=conv.created_at,
@@ -72,9 +78,12 @@ async def list_conversations():
 
 
 @router.get("/conversations/{session_id}", response_model=ConversationDetail)
-async def get_conversation(session_id: UUID):
+async def get_conversation(session_id: UUID, user_id: UUID | None = Query(default=None)):
     """Get conversation details with all messages."""
-    conversation = await Conversation.get_or_none(session_id=session_id)
+    query = Conversation.filter(session_id=session_id)
+    if user_id:
+        query = query.filter(user_id=user_id)
+    conversation = await query.first()
     
     if not conversation:
         raise HTTPException(
@@ -87,6 +96,7 @@ async def get_conversation(session_id: UUID):
     ).order_by("timestamp")
     
     return ConversationDetail(
+        user_id=conversation.user_id,
         session_id=conversation.session_id,
         title=conversation.title,
         created_at=conversation.created_at,
@@ -95,9 +105,12 @@ async def get_conversation(session_id: UUID):
 
 
 @router.delete("/conversations/{session_id}")
-async def delete_conversation(session_id: UUID):
+async def delete_conversation(session_id: UUID, user_id: UUID | None = Query(default=None)):
     """Delete a conversation and all its messages."""
-    conversation = await Conversation.get_or_none(session_id=session_id)
+    query = Conversation.filter(session_id=session_id)
+    if user_id:
+        query = query.filter(user_id=user_id)
+    conversation = await query.first()
     
     if not conversation:
         raise HTTPException(

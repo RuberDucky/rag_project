@@ -8,6 +8,7 @@ from uuid import UUID
 class DocumentUploadResponse(BaseModel):
     """Response schema for document upload."""
     id: int
+    user_id: UUID
     filename: str
     file_type: str
     file_size: int
@@ -18,6 +19,7 @@ class DocumentUploadResponse(BaseModel):
 class DocumentListItem(BaseModel):
     """Schema for document list item."""
     id: int
+    user_id: UUID
     filename: str
     file_type: str
     file_size: int
@@ -32,6 +34,7 @@ class DocumentListItem(BaseModel):
 class ChatRequest(BaseModel):
     """Request schema for chat endpoint."""
     message: str = Field(..., min_length=1, max_length=5000)
+    user_id: Optional[UUID] = None
     session_id: Optional[UUID] = None
 
 
@@ -44,6 +47,7 @@ class ContextItem(BaseModel):
 
 class ChatResponse(BaseModel):
     """Response schema for chat endpoint."""
+    user_id: UUID
     session_id: UUID
     message: str
     response: str
@@ -53,6 +57,7 @@ class ChatResponse(BaseModel):
 
 class ConversationHistory(BaseModel):
     """Schema for conversation history."""
+    user_id: UUID
     session_id: UUID
     title: Optional[str]
     created_at: datetime
@@ -71,6 +76,7 @@ class MessageItem(BaseModel):
 
 class ConversationDetail(BaseModel):
     """Schema for detailed conversation with messages."""
+    user_id: UUID
     session_id: UUID
     title: Optional[str]
     created_at: datetime

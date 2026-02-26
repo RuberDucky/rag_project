@@ -53,6 +53,10 @@ TOP_K_RESULTS=5
 # Upload Configuration
 UPLOAD_DIR=uploads
 MAX_FILE_SIZE=10485760
+
+# Cleanup Configuration
+DOCUMENT_RETENTION_DAYS=2
+CLEANUP_INTERVAL_HOURS=24
 ```
 
 3. **Run the application**:
@@ -61,6 +65,8 @@ uv run uvicorn main:app --reload
 ```
 
 ## API Endpoints
+
+For frontend handoff with exact payload contracts, see [API_FRONTEND_GUIDE.md](API_FRONTEND_GUIDE.md).
 
 ### Documents
 - `POST /documents/upload` - Upload and process documents
@@ -105,17 +111,22 @@ rag_project/
 
 ### Upload a Document
 ```bash
-curl -X POST "http://localhost:8000/documents/upload" \
+curl -X POST "http://localhost:8000/documents/upload?user_id=11111111-1111-1111-1111-111111111111" \
   -H "Content-Type: multipart/form-data" \
   -F "file=@/path/to/document.pdf"
 ```
+
+If `user_id` is not provided, the API creates one and returns it in the upload response.
+
+Use `user_id` as a query parameter for document listing and deletion to keep data scoped by user.
 
 ### Start a Chat
 ```bash
 curl -X POST "http://localhost:8000/chat/" \
   -H "Content-Type: application/json" \
   -d '{
-    "message": "What are your business hours?"
+    "message": "What are your business hours?",
+    "user_id": "11111111-1111-1111-1111-111111111111"
   }'
 ```
 
@@ -125,6 +136,7 @@ curl -X POST "http://localhost:8000/chat/" \
   -H "Content-Type: application/json" \
   -d '{
     "message": "Do you offer weekend support?",
+    "user_id": "11111111-1111-1111-1111-111111111111",
     "session_id": "previous-session-id-uuid"
   }'
 ```
@@ -162,6 +174,8 @@ Edit `.env` file:
 - `CHUNK_OVERLAP`: Overlap between chunks (default: 200)
 - `TOP_K_RESULTS`: Number of chunks to retrieve (default: 5)
 - `MAX_FILE_SIZE`: Max upload size in bytes (default: 10MB)
+- `DOCUMENT_RETENTION_DAYS`: Delete uploaded docs older than this (default: 2)
+- `CLEANUP_INTERVAL_HOURS`: Cleanup scheduler frequency (default: 24)
 
 ## Development
 

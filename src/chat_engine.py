@@ -20,16 +20,18 @@ class ConversationMemory:
     
     async def get_or_create_conversation(
         self,
+        user_id: UUID,
         session_id: Optional[UUID] = None
     ) -> Conversation:
         """Get existing conversation or create new one."""
         if session_id:
-            conversation = await Conversation.get_or_none(session_id=session_id)
+            conversation = await Conversation.get_or_none(session_id=session_id, user_id=user_id)
             if conversation:
                 return conversation
         
         # Create new conversation
         conversation = await Conversation.create(
+            user_id=user_id,
             session_id=session_id or uuid4()
         )
         logger.info(f"Created new conversation: {conversation.session_id}")
@@ -114,6 +116,7 @@ class RAGChatEngine:
     async def chat(
         self,
         user_message: str,
+        user_id: Optional[UUID] = None,
         session_id: Optional[UUID] = None
     ) -> Dict:
         """
@@ -121,16 +124,25 @@ class RAGChatEngine:
         
         Args:
             user_message: User's message
+            user_id: User ID for ownership scoping
             session_id: Optional session ID for conversation continuity
             
         Returns:
             Dictionary with response and metadata
         """
-        # Get or create conversation
-        conversation = await self.memory.get_or_create_conversation(session_id)
+        resolved_user_id = user_id or uuid4()
+
+        # Get or create conversation for this user
+        conversation = await self.memory.get_or_create_conversation(
+            user_id=resolved_user_id,
+            session_id=session_id
+        )
         
         # Retrieve relevant context from vector store
-        relevant_chunks = await self.vector_store.similarity_search(user_message)
+        relevant_chunks = await self.vector_store.similarity_search(
+            query=user_message,
+            user_id=resolved_user_id
+        )
         
         # Format context for prompt
         context_text = self._format_context(relevant_chunks)
@@ -183,6 +195,7 @@ class RAGChatEngine:
         ]
         
         return {
+            "user_id": conversation.user_id,
             "session_id": conversation.session_id,
             "response": response,
             "context": context_items

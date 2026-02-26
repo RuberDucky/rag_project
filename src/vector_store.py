@@ -1,5 +1,6 @@
 """Vector store operations with pgvector."""
 from typing import List, Dict, Any, Optional
+from uuid import UUID
 from tortoise import Tortoise
 from src.models import DocumentChunk
 from src.ollama_client import OllamaClient
@@ -73,6 +74,7 @@ class VectorStore:
     async def similarity_search(
         self,
         query: str,
+        user_id: UUID,
         top_k: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
@@ -80,6 +82,7 @@ class VectorStore:
         
         Args:
             query: Search query
+            user_id: User ID to scope retrieval
             top_k: Number of results to return
             
         Returns:
@@ -107,11 +110,11 @@ class VectorStore:
                 FROM document_embeddings de
                 JOIN document_chunks dc ON de.chunk_id = dc.id
                 JOIN documents d ON dc.document_id = d.id
-                WHERE d.processed = true
+                WHERE d.processed = true AND d.user_id = $2
                 ORDER BY de.embedding <=> $1::vector
-                LIMIT $2
+                LIMIT $3
                 """,
-                [embedding_str, top_k]
+                [embedding_str, str(user_id), top_k]
             )
             
             formatted_results = []

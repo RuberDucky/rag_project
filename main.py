@@ -10,6 +10,7 @@ from src.routes import documents, chat
 from src.schemas import HealthCheck
 from src.ollama_client import OllamaClient
 from src.config import get_settings
+from src.cleanup_service import DocumentCleanupService
 from tortoise import Tortoise
 from tortoise.contrib.fastapi import register_tortoise
 
@@ -21,6 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+cleanup_service = DocumentCleanupService()
 
 
 # Function to setup pgvector tables
@@ -32,6 +34,36 @@ async def setup_pgvector():
         # Enable pgvector extension
         await conn.execute_script("""
             CREATE EXTENSION IF NOT EXISTS vector;
+            CREATE EXTENSION IF NOT EXISTS pgcrypto;
+        """)
+
+        # Ensure user ownership columns exist
+        await conn.execute_script("""
+            ALTER TABLE documents
+            ADD COLUMN IF NOT EXISTS user_id UUID;
+
+            UPDATE documents
+            SET user_id = gen_random_uuid()
+            WHERE user_id IS NULL;
+
+            ALTER TABLE documents
+            ALTER COLUMN user_id SET NOT NULL;
+
+            CREATE INDEX IF NOT EXISTS documents_user_id_idx
+            ON documents(user_id);
+
+            ALTER TABLE conversations
+            ADD COLUMN IF NOT EXISTS user_id UUID;
+
+            UPDATE conversations
+            SET user_id = gen_random_uuid()
+            WHERE user_id IS NULL;
+
+            ALTER TABLE conversations
+            ALTER COLUMN user_id SET NOT NULL;
+
+            CREATE INDEX IF NOT EXISTS conversations_user_id_idx
+            ON conversations(user_id);
         """)
         
         # Create vector embeddings table
@@ -65,11 +97,13 @@ async def lifespan(app: FastAPI):
     logger.info("Starting RAG Chatbot application...")
     # pgvector setup will be done after Tortoise init via register_tortoise
     await setup_pgvector()
+    await cleanup_service.start()
     logger.info("Database initialized successfully")
     
     yield
     
     # Shutdown handled by register_tortoise
+    await cleanup_service.stop()
     logger.info("Shutting down RAG Chatbot application...")
 
 

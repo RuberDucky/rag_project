@@ -53,6 +53,9 @@ async def test_chat(message: str, session_id: str = None):
     print(f"\n💬 Sending message: {message}")
     async with httpx.AsyncClient(timeout=120.0) as client:
         payload = {"message": message}
+        current_user_id = getattr(test_chat, "user_id", None)
+        if current_user_id:
+            payload["user_id"] = current_user_id
         if session_id:
             payload["session_id"] = session_id
         
@@ -64,6 +67,7 @@ async def test_chat(message: str, session_id: str = None):
         if response.status_code == 200:
             data = response.json()
             print(f"Session ID: {data['session_id']}")
+            print(f"User ID: {data['user_id']}")
             print(f"Response: {data['response']}")
             print(f"\nContext used ({len(data['context'])} sources):")
             for ctx in data['context']:
@@ -109,6 +113,7 @@ async def run_tests():
     
     chat1 = await test_chat("Hello! How can you help me?")
     if chat1:
+        test_chat.user_id = chat1['user_id']
         session_id = chat1['session_id']
         
         # Continue conversation
@@ -130,4 +135,5 @@ async def run_tests():
 
 
 if __name__ == "__main__":
+    test_chat.user_id = None
     asyncio.run(run_tests())

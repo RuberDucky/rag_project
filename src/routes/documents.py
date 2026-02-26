@@ -1,11 +1,12 @@
 """API routes for document management."""
-from fastapi import APIRouter, UploadFile, File, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, HTTPException, status, Query
 from typing import List
 import os
 import shutil
 from pathlib import Path
 import uuid
 from datetime import datetime
+from uuid import UUID
 
 from src.models import Document
 from src.schemas import DocumentUploadResponse, DocumentListItem
@@ -24,7 +25,10 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 
 @router.post("/upload", response_model=DocumentUploadResponse)
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(
+    file: UploadFile = File(...),
+    user_id: UUID | None = Query(default=None)
+):
     """
     Upload and process a document.
     
@@ -49,6 +53,8 @@ async def upload_document(file: UploadFile = File(...)):
         )
     
     try:
+        resolved_user_id = user_id or uuid.uuid4()
+
         # Generate unique filename
         file_ext = DocumentProcessor.get_file_extension(file.filename)
         unique_filename = f"{uuid.uuid4()}{file_ext}"
@@ -60,6 +66,7 @@ async def upload_document(file: UploadFile = File(...)):
         
         # Create database record
         doc = await Document.create(
+            user_id=resolved_user_id,
             filename=unique_filename,
             original_filename=file.filename,
             file_type=file_ext.replace('.', ''),
@@ -98,6 +105,7 @@ async def upload_document(file: UploadFile = File(...)):
         
         return DocumentUploadResponse(
             id=doc.id,
+            user_id=doc.user_id,
             filename=doc.original_filename,
             file_type=doc.file_type,
             file_size=doc.file_size,
@@ -116,16 +124,22 @@ async def upload_document(file: UploadFile = File(...)):
 
 
 @router.get("/", response_model=List[DocumentListItem])
-async def list_documents():
-    """Get list of all uploaded documents."""
-    documents = await Document.all().order_by("-upload_date")
+async def list_documents(user_id: UUID | None = Query(default=None)):
+    """Get list of uploaded documents, optionally filtered by user_id."""
+    query = Document.all()
+    if user_id:
+        query = query.filter(user_id=user_id)
+    documents = await query.order_by("-upload_date")
     return [DocumentListItem.model_validate(doc) for doc in documents]
 
 
 @router.get("/{document_id}", response_model=DocumentListItem)
-async def get_document(document_id: int):
+async def get_document(document_id: int, user_id: UUID | None = Query(default=None)):
     """Get details of a specific document."""
-    doc = await Document.get_or_none(id=document_id)
+    query = Document.filter(id=document_id)
+    if user_id:
+        query = query.filter(user_id=user_id)
+    doc = await query.first()
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -135,9 +149,12 @@ async def get_document(document_id: int):
 
 
 @router.delete("/{document_id}")
-async def delete_document(document_id: int):
+async def delete_document(document_id: int, user_id: UUID | None = Query(default=None)):
     """Delete a document and its embeddings."""
-    doc = await Document.get_or_none(id=document_id)
+    query = Document.filter(id=document_id)
+    if user_id:
+        query = query.filter(user_id=user_id)
+    doc = await query.first()
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

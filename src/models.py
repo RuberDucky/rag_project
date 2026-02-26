@@ -9,6 +9,7 @@ class Document(Model):
     """Model for storing uploaded documents."""
     
     id = fields.IntField(pk=True)
+    user_id = fields.UUIDField()
     filename = fields.CharField(max_length=255)
     original_filename = fields.CharField(max_length=255)
     file_type = fields.CharField(max_length=50)
@@ -28,6 +29,7 @@ class Conversation(Model):
     """Model for storing conversation sessions."""
     
     id = fields.IntField(pk=True)
+    user_id = fields.UUIDField()
     session_id = fields.UUIDField(unique=True)
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
