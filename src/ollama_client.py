@@ -1,6 +1,7 @@
 """Ollama client for embeddings and chat."""
 import httpx
-from typing import List, Dict, Any
+from typing import List, Dict, Any, AsyncIterator
+import json
 from src.config import get_settings
 import logging
 
@@ -15,6 +16,11 @@ class OllamaClient:
         self.base_url = self.settings.OLLAMA_BASE_URL
         self.embedding_model = self.settings.EMBEDDING_MODEL
         self.chat_model = self.settings.CHAT_MODEL
+        self.chat_options = {
+            "temperature": self.settings.OLLAMA_TEMPERATURE,
+            "top_p": self.settings.OLLAMA_TOP_P,
+            "repeat_penalty": self.settings.OLLAMA_REPEAT_PENALTY,
+        }
         
     async def get_embedding(self, text: str) -> List[float]:
         """Get embedding for a text using Ollama."""
@@ -59,7 +65,8 @@ class OllamaClient:
                     json={
                         "model": self.chat_model,
                         "messages": messages,
-                        "stream": stream
+                        "stream": stream,
+                        "options": self.chat_options,
                     }
                 )
                 response.raise_for_status()
@@ -67,6 +74,40 @@ class OllamaClient:
                 return data.get("message", {}).get("content", "")
             except Exception as e:
                 logger.error(f"Error in chat: {e}")
+                raise
+
+    async def chat_stream_tokens(self, messages: List[Dict[str, str]]) -> AsyncIterator[str]:
+        """Stream response tokens from Ollama chat API."""
+        url = f"{self.base_url}/api/chat"
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            try:
+                async with client.stream(
+                    "POST",
+                    url,
+                    json={
+                        "model": self.chat_model,
+                        "messages": messages,
+                        "stream": True,
+                        "options": self.chat_options,
+                    },
+                ) as response:
+                    response.raise_for_status()
+
+                    async for line in response.aiter_lines():
+                        if not line:
+                            continue
+
+                        payload = json.loads(line)
+
+                        if payload.get("done"):
+                            break
+
+                        chunk = payload.get("message", {}).get("content", "")
+                        if chunk:
+                            yield chunk
+            except Exception as e:
+                logger.error(f"Error in streaming chat: {e}")
                 raise
     
     async def health_check(self) -> bool:

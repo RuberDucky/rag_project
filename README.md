@@ -76,6 +76,7 @@ For frontend handoff with exact payload contracts, see [API_FRONTEND_GUIDE.md](A
 
 ### Chat
 - `POST /chat/` - Send message and get AI response
+- `POST /chat/stream` - Stream AI response via Server-Sent Events (SSE)
 - `GET /chat/conversations` - List all conversations
 - `GET /chat/conversations/{session_id}` - Get conversation details
 - `DELETE /chat/conversations/{session_id}` - Delete conversation
@@ -139,6 +140,85 @@ curl -X POST "http://localhost:8000/chat/" \
     "user_id": "11111111-1111-1111-1111-111111111111",
     "session_id": "previous-session-id-uuid"
   }'
+```
+
+### Stream Chat Response (New Endpoint)
+
+Use this endpoint for token-by-token rendering in the frontend without changing the existing `/chat/` API.
+
+```bash
+curl -N -X POST "http://localhost:8000/chat/stream" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Extract all percentages from my resume",
+    "user_id": "11111111-1111-1111-1111-111111111111"
+  }'
+```
+
+The stream returns SSE events:
+
+- `meta`: includes `user_id`, `session_id`, and retrieved `context`
+- `token`: includes incremental `content` to append in UI
+- `done`: includes final `response`, `user_id`, `session_id`, `context`, `timestamp`
+- `error`: includes terminal error message
+
+### Frontend Streaming Guide (Fetch + SSE Parsing)
+
+```javascript
+const response = await fetch('http://localhost:8000/chat/stream', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    message: 'Extract all percentages from my resume',
+    user_id: '11111111-1111-1111-1111-111111111111',
+    session_id: null,
+  }),
+});
+
+if (!response.ok || !response.body) throw new Error('Stream request failed');
+
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+let buffer = '';
+let assistantText = '';
+
+while (true) {
+  const { value, done } = await reader.read();
+  if (done) break;
+
+  buffer += decoder.decode(value, { stream: true });
+  const events = buffer.split('\n\n');
+  buffer = events.pop() ?? '';
+
+  for (const rawEvent of events) {
+    const eventLine = rawEvent.split('\n').find((line) => line.startsWith('event: '));
+    const dataLine = rawEvent.split('\n').find((line) => line.startsWith('data: '));
+    if (!eventLine || !dataLine) continue;
+
+    const eventType = eventLine.replace('event: ', '').trim();
+    const payload = JSON.parse(dataLine.replace('data: ', ''));
+
+    if (eventType === 'meta') {
+      // Save session_id/user_id/context for future turns and citations
+      console.log('meta', payload);
+    }
+
+    if (eventType === 'token') {
+      assistantText += payload.content;
+      // Render progressively in UI
+      renderAssistantText(assistantText);
+    }
+
+    if (eventType === 'done') {
+      // Final payload includes full response + metadata
+      console.log('done', payload);
+    }
+
+    if (eventType === 'error') {
+      console.error('stream error', payload.message);
+    }
+  }
+}
 ```
 
 ## Features in Detail

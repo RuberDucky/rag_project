@@ -23,10 +23,16 @@ class Settings(BaseSettings):
     CHAT_MODEL: str = "lfm2.5-thinking"
     
     # RAG Config
-    CHUNK_SIZE: int = 1000
-    CHUNK_OVERLAP: int = 200
-    TOP_K_RESULTS: int = 5
+    CHUNK_SIZE: int = 500
+    CHUNK_OVERLAP: int = 100
+    TOP_K_RESULTS: int = 8
+    RETRIEVAL_CANDIDATE_MULTIPLIER: int = 4
     EMBEDDING_DIMENSION: int = 4096
+
+    # Generation Config
+    OLLAMA_TEMPERATURE: float = 0.0
+    OLLAMA_TOP_P: float = 0.1
+    OLLAMA_REPEAT_PENALTY: float = 1.1
     
     # Upload Config
     UPLOAD_DIR: str = "uploads"

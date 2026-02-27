@@ -1,8 +1,10 @@
 """API routes for chat functionality."""
-from fastapi import APIRouter, HTTPException, status, Query
+from fastapi import APIRouter, HTTPException, status, Query, Request
+from fastapi.responses import StreamingResponse
 from typing import List
 from uuid import UUID
 from datetime import datetime
+import json
 
 from src.schemas import (
     ChatRequest,
@@ -51,6 +53,48 @@ async def chat(request: ChatRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing chat: {str(e)}"
         )
+
+
+@router.post("/stream")
+async def chat_stream(payload: ChatRequest, request: Request):
+    """
+    Stream AI response tokens with RAG via Server-Sent Events (SSE).
+
+    Event types:
+    - meta: session metadata and retrieval context
+    - token: incremental response token/chunk
+    - done: final assembled response and metadata
+    - error: terminal error details
+    """
+
+    async def event_generator():
+        try:
+            async for event in chat_engine.chat_stream(
+                user_message=payload.message,
+                user_id=payload.user_id,
+                session_id=payload.session_id,
+            ):
+                if await request.is_disconnected():
+                    logger.info("Client disconnected from /chat/stream")
+                    break
+
+                event_type = event.get("type", "message")
+                data = json.dumps(event, ensure_ascii=False)
+                yield f"event: {event_type}\ndata: {data}\n\n"
+        except Exception as e:
+            logger.error(f"Error in chat stream: {e}")
+            error_payload = json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
+            yield f"event: error\ndata: {error_payload}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/conversations", response_model=List[ConversationHistory])

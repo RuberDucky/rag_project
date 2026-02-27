@@ -1,6 +1,7 @@
 """Conversation memory management."""
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, AsyncIterator, Any
 from uuid import UUID, uuid4
+from datetime import datetime
 from src.models import Conversation, Message
 from src.ollama_client import OllamaClient
 from src.vector_store import VectorStore
@@ -200,6 +201,84 @@ class RAGChatEngine:
             "response": response,
             "context": context_items
         }
+
+    async def chat_stream(
+        self,
+        user_message: str,
+        user_id: Optional[UUID] = None,
+        session_id: Optional[UUID] = None,
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """Stream chat response tokens while preserving conversation persistence."""
+        resolved_user_id = user_id or uuid4()
+
+        conversation = await self.memory.get_or_create_conversation(
+            user_id=resolved_user_id,
+            session_id=session_id,
+        )
+
+        relevant_chunks = await self.vector_store.similarity_search(
+            query=user_message,
+            user_id=resolved_user_id,
+        )
+
+        context_text = self._format_context(relevant_chunks)
+        history = await self.memory.format_history_for_llm(conversation.id)
+        system_prompt = self._build_system_prompt(context_text)
+
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": user_message})
+
+        context_items = [
+            ContextItem(
+                content=chunk["content"][:200] + "..." if len(chunk["content"]) > 200 else chunk["content"],
+                source=chunk["source"],
+                score=chunk["score"],
+            )
+            for chunk in relevant_chunks[:3]
+        ]
+
+        yield {
+            "type": "meta",
+            "user_id": str(conversation.user_id),
+            "session_id": str(conversation.session_id),
+            "context": [item.model_dump() for item in context_items],
+        }
+
+        response_parts: List[str] = []
+        async for token in self.ollama.chat_stream_tokens(messages):
+            response_parts.append(token)
+            yield {"type": "token", "content": token}
+
+        full_response = "".join(response_parts).strip()
+
+        await self.memory.add_message(
+            conversation_id=conversation.id,
+            role="user",
+            content=user_message,
+            context=[chunk["content"] for chunk in relevant_chunks],
+        )
+
+        await self.memory.add_message(
+            conversation_id=conversation.id,
+            role="assistant",
+            content=full_response,
+            context=None,
+        )
+
+        if await Message.filter(conversation_id=conversation.id).count() <= 2:
+            title = await self.memory.generate_conversation_title(conversation.id)
+            conversation.title = title
+            await conversation.save()
+
+        yield {
+            "type": "done",
+            "user_id": str(conversation.user_id),
+            "session_id": str(conversation.session_id),
+            "response": full_response,
+            "context": [item.model_dump() for item in context_items],
+            "timestamp": datetime.now().isoformat(),
+        }
     
     def _format_context(self, chunks: List[Dict]) -> str:
         """Format retrieved chunks into context string."""
@@ -216,18 +295,20 @@ class RAGChatEngine:
     
     def _build_system_prompt(self, context: str) -> str:
         """Build system prompt with context."""
-        return f"""You are a helpful customer support assistant. Use the following context from our knowledge base to answer user questions accurately and helpfully.
+        return f"""You are a factual extraction engine for retrieval-augmented QA.
 
-If the context contains relevant information, use it to provide detailed and accurate answers. If the context doesn't contain relevant information, you can still try to help based on your general knowledge, but mention that the information might not be from the official knowledge base.
+    Rules:
+    1. Use only explicitly stated information from the CONTEXT.
+    2. Do not infer, generalize, summarize beyond explicit statements, or use outside knowledge.
+    3. If the answer is present, quote precise facts, values, entities, dates, and percentages exactly.
+    4. If the user asks for numeric information, include every relevant numeric value found in the context.
+    5. If information is missing, answer exactly: Not found in document.
+    6. Keep answers concise and factual.
 
-Always be polite, professional, and aim to resolve the user's query effectively.
+    Output format:
+    - Start with the direct answer.
+    - Add a short 'Evidence:' section with supporting snippets and source labels.
 
-CONTEXT:
-{context}
-
-Remember to:
-1. Cite sources when using information from the context
-2. Be concise but thorough
-3. Ask clarifying questions if needed
-4. Admit if you don't know something rather than making up information
-"""
+    CONTEXT:
+    {context}
+    """

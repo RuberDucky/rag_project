@@ -1,5 +1,6 @@
 """Text chunking and splitting utilities."""
 from typing import List, Dict, Any
+import re
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from src.config import get_settings
 import logging
@@ -18,6 +19,35 @@ class TextChunker:
             length_function=len,
             separators=["\n\n", "\n", ". ", " ", ""]
         )
+
+    def _split_by_structure(self, text: str) -> List[str]:
+        """Split text into structure-aware sections before recursive chunking."""
+        lines = [line.rstrip() for line in text.splitlines()]
+        sections: List[str] = []
+        current: List[str] = []
+
+        heading_pattern = re.compile(r"^(?:[A-Z][A-Z\s&/\-]{2,}|\d+\.?\s+[A-Z].+)$")
+
+        for line in lines:
+            stripped = line.strip()
+
+            if not stripped:
+                if current and current[-1] != "":
+                    current.append("")
+                continue
+
+            is_heading = bool(heading_pattern.match(stripped))
+
+            if is_heading and current:
+                sections.append("\n".join(current).strip())
+                current = [stripped]
+            else:
+                current.append(stripped)
+
+        if current:
+            sections.append("\n".join(current).strip())
+
+        return [section for section in sections if section]
     
     def chunk_text(
         self,
@@ -35,7 +65,14 @@ class TextChunker:
             List of chunks with content and metadata
         """
         try:
-            chunks = self.splitter.split_text(text)
+            sections = self._split_by_structure(text)
+            chunks: List[str] = []
+
+            for section in sections:
+                if len(section) <= self.settings.CHUNK_SIZE:
+                    chunks.append(section)
+                else:
+                    chunks.extend(self.splitter.split_text(section))
             
             chunk_list = []
             for idx, chunk in enumerate(chunks):

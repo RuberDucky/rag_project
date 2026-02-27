@@ -1,12 +1,12 @@
 """Vector store operations with pgvector."""
 from typing import List, Dict, Any, Optional
 from uuid import UUID
+import re
 from tortoise import Tortoise
 from src.models import DocumentChunk
 from src.ollama_client import OllamaClient
 from src.config import get_settings
 import logging
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,30 @@ class VectorStore:
     def __init__(self):
         self.ollama = OllamaClient()
         self.settings = get_settings()
+
+    @staticmethod
+    def _tokenize(text: str) -> set[str]:
+        return set(re.findall(r"[a-zA-Z0-9%\.\-]+", text.lower()))
+
+    @staticmethod
+    def _extract_numbers(text: str) -> set[str]:
+        return set(re.findall(r"\b\d+(?:\.\d+)?%?\b", text.lower()))
+
+    def _lexical_score(self, query: str, content: str) -> float:
+        query_tokens = self._tokenize(query)
+        content_tokens = self._tokenize(content)
+        if not query_tokens:
+            return 0.0
+
+        token_overlap = len(query_tokens & content_tokens) / max(len(query_tokens), 1)
+
+        query_numbers = self._extract_numbers(query)
+        content_numbers = self._extract_numbers(content)
+        numeric_overlap = 0.0
+        if query_numbers:
+            numeric_overlap = len(query_numbers & content_numbers) / len(query_numbers)
+
+        return (0.7 * token_overlap) + (0.3 * numeric_overlap)
     
     async def add_chunks_with_embeddings(
         self,
@@ -90,6 +114,8 @@ class VectorStore:
         """
         if top_k is None:
             top_k = self.settings.TOP_K_RESULTS
+
+        candidate_limit = max(top_k * self.settings.RETRIEVAL_CANDIDATE_MULTIPLIER, top_k)
         
         conn = Tortoise.get_connection("default")
         
@@ -114,18 +140,25 @@ class VectorStore:
                 ORDER BY de.embedding <=> $1::vector
                 LIMIT $3
                 """,
-                [embedding_str, str(user_id), top_k]
+                [embedding_str, str(user_id), candidate_limit]
             )
             
-            formatted_results = []
+            ranked_results = []
             for row in results:
-                formatted_results.append({
+                semantic_score = float(row["similarity"])
+                lexical_score = self._lexical_score(query, row["content"])
+                combined_score = (0.75 * semantic_score) + (0.25 * lexical_score)
+
+                ranked_results.append({
                     "chunk_id": row["chunk_id"],
                     "content": row["content"],
                     "metadata": row["metadata"],
                     "source": row["original_filename"],
-                    "score": float(row["similarity"])
+                    "score": combined_score
                 })
+
+            ranked_results.sort(key=lambda item: item["score"], reverse=True)
+            formatted_results = ranked_results[:top_k]
             
             logger.info(f"Found {len(formatted_results)} relevant chunks")
             return formatted_results
