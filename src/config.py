@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     DB_NAME: str
     
     # Ollama Config
-    OLLAMA_BASE_URL: str = "http://192.168.18.7:11434"
+    OLLAMA_BASE_URL: str = "http://192.168.18.7:11440"
     EMBEDDING_MODEL: str = "qwen3-embedding:latest"
     CHAT_MODEL: str = "lfm2.5-thinking"
     
